@@ -1,0 +1,61 @@
+#!/usr/bin/python
+
+import math
+import sys
+import re
+import csv
+import MySQLdb
+import itertools
+import argparse
+
+# format for execution: ./findCooccupancy.py <loci file> <comma separated list of marks to check> <window size> <outputfile>
+# example: ./findCooccupancy.py AllGenes.txt PolII-ChIP,KAP1-ChIP,Hexim 150 output.txt
+# format of loci file:
+# chr2	12345678	12345900	GENEA	1	+
+# chr4	987654321	98765000	GENEB	1	-
+# etc...
+
+locifile = sys.argv[1]
+marks = sys.argv[2]
+window = int(sys.argv[3])
+outputfile = sys.argv[4]
+loci = list(csv.reader(open(locifile, 'rb'),delimiter='\t'))
+#loci = list(itertools.chain.from_iterable(loci))
+db = MySQLdb.connect(host="localhost",user="snrnp",passwd="snrnp",db="snrnp")
+cur = db.cursor()
+
+cntdict = {}
+for mark in marks.split(","):
+	cntdict[mark] = []
+counter = 1
+for locus in loci:
+	print "Working on line# " + str(counter)
+	counter += 1
+	if str(locus[5]) == "+":
+		tss = locus[1]
+	else:
+		tss = locus[2]
+	for mark in marks.split(","):
+# this is incredibly dirty. sorry. I don't have time to do this better 
+		if mark == 'PolII-ChIP':
+			cur.execute("select count(*) from CHIP_PEAK where mark = '" + str(mark) + "' and chr = '" + str(locus[0]) + "' and (abs(summit - " + str(tss) + ") < " + str(window) + ")")
+#			print "select count(*) from CHIP_PEAK where mark = '" + str(mark) + "' and chr = '" + str(locus[0]) + "' and (abs(summit - " + str(tss) + ") < " + str(window) + ")"
+		else:
+			cur.execute("select count(*) from CHIP_PEAK where mark = '" + str(mark) + "' and chr = '" + str(locus[0]) + "' and ((chr_start < " + str(tss) + " and chr_end > " + str(tss) + ") or (abs(chr_start - " + str(tss) + ") < " + str(window) + ") or (abs(chr_end - " + str(tss) + ") < " + str(window) + "))")
+#			print "select count(*) from CHIP_PEAK where mark = '" + str(mark) + "' and chr = '" + str(locus[0]) + "' and ((chr_start < " + str(tss) + " and chr_end > " + str(tss) + ") or (abs(chr_start - " + str(tss) + ") < " + str(window) + ") or (abs(chr_end - " + str(tss) + ") < " + str(window) + "))"
+		cnt = cur.fetchone()[0]
+		if cnt > 0:
+			cntdict[mark].append(",".join(locus))
+convertedlist = []
+for key in cntdict.keys():
+	convertedlist.append(cntdict[key]) 
+intersectlist = set(convertedlist[0]).intersection(*convertedlist[1:])
+
+for key in cntdict.keys():
+	print str(key) + " hits: " + str(len(cntdict[key]))
+print "\nTotal Intersection Count: " + str(len(intersectlist)) 
+
+with open(outputfile, 'w') as outputwriter:
+	for line in intersectlist:
+		outputwriter.write(line + "\n")
+
